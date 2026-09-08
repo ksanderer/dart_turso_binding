@@ -99,7 +99,7 @@ and explicitly frees native resources. Always close databases, including on erro
 | Target | CI scope |
 | --- | --- |
 | macOS ARM64, Linux x64, Windows x64 | Dart runtime and local sync integration tests |
-| iOS ARM64 device/simulator | Native cross-build only; no device/runtime claim |
+| iOS 13+ ARM64 device/simulator | Native cross-build only; no device/runtime claim |
 | Android ARM64 | Native cross-build only; no device/runtime claim |
 | Other architectures, web | Not covered / not supported in this release |
 

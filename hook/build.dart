@@ -6,6 +6,8 @@ void main(List<String> args) async {
     await const RustBuilder(
       assetName: 'src/native.dart',
       extraCargoBuildArgs: ['--locked'],
+      // Keep Rust and transitive C libraries on the same iOS deployment floor.
+      extraCargoEnvironmentVariables: {'IPHONEOS_DEPLOYMENT_TARGET': '13.0'},
     ).run(input: input, output: output);
   });
 }

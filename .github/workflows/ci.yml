@@ -57,6 +57,8 @@ jobs:
     name: iOS native compile (not device tests)
     runs-on: macos-14
     timeout-minutes: 45
+    env:
+      IPHONEOS_DEPLOYMENT_TARGET: '13.0'
     strategy:
       fail-fast: false
       matrix:
