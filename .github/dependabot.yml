@@ -2,13 +2,25 @@ version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
+    groups:
+      actions:
+        patterns: ['*']
+    open-pull-requests-limit: 1
     schedule:
       interval: weekly
   - package-ecosystem: cargo
     directory: /rust
+    groups:
+      native:
+        patterns: ['*']
+    open-pull-requests-limit: 1
     schedule:
       interval: weekly
   - package-ecosystem: pub
     directory: /
+    groups:
+      dart:
+        patterns: ['*']
+    open-pull-requests-limit: 1
     schedule:
       interval: weekly
