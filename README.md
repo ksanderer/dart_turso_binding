@@ -26,7 +26,9 @@ dependencies:
 ```
 
 Requires Dart **3.12+**, `rustup`, and a native linker (Xcode Command Line Tools on
-macOS, a C/C++ toolchain on Linux, Visual Studio C++ Build Tools on Windows).
+macOS, a C/C++ toolchain on Linux, Visual Studio C++ Build Tools and the Windows SDK
+on Windows). On Windows, run from the **x64 Native Tools Command Prompt** so the
+SDK resource compiler (`rc.exe`) is on PATH.
 Build hooks compile the bundled Rust crate from source; no opaque prebuilt
 binding binaries are downloaded. Rust **1.95.0**, Turso **0.7.2**, and the native
 lockfile are pinned. First builds download dependencies and can take minutes.
