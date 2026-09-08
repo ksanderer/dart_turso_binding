@@ -21,7 +21,7 @@ jobs:
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: '3.13.2'
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - uses: Swatinem/rust-cache@v2
