@@ -72,7 +72,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
       - run: sdkmanager 'ndk;27.2.12479018'
       - uses: Swatinem/rust-cache@v2
         with:
