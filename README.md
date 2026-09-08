@@ -55,6 +55,25 @@ back. Do not put transaction-control SQL inside a batch. Parameters support
 `null`, signed 64-bit `int`, finite `double`, `String`, and `Uint8List`.
 Column names and ordered rows preserve duplicate column names.
 
+Interactive transactions use an exclusive `BEGIN IMMEDIATE`:
+
+```dart
+final count = await db.transaction((tx) async {
+  final rows = await tx.query('SELECT COUNT(*) FROM notes');
+  await tx.execute('INSERT INTO notes(body) VALUES (?)', ['Another note']);
+  return rows.rows.single.single as int;
+});
+```
+
+Use the callback's handle, not `db`, inside the callback. Direct database calls,
+nested transactions, and `close()` inside the callback reject rather than
+deadlock. Requests from outside the callback (including push/pull/checkpoint and
+close) wait until it finishes. Handles expire after the callback; already
+submitted handle operations drain before commit. A failed statement forces
+rollback even if its error was caught. Callback and commit failures also attempt
+rollback. A rollback failure rejects further work; always close the database.
+Never issue transaction-control SQL through the handle.
+
 ### Sync
 
 ```dart
@@ -95,8 +114,9 @@ visibility differ. FTS remains experimental upstream.
 
 One dedicated worker isolate owns each database and connection. SQL, filesystem,
 and network waits do not block the caller isolate. Requests execute in order;
-batches cannot interleave with other requests. `close()` drains submitted work
-and explicitly frees native resources. Always close databases, including on errors.
+batches and transaction callbacks cannot interleave with other requests.
+`close()` drains submitted work and explicitly frees native resources.
+Always close databases, including on errors.
 
 | Target | CI scope |
 | --- | --- |
@@ -109,8 +129,8 @@ Mobile native compilation does **not** yet certify Flutter packaging, app signin
 background execution, or store distribution. Check the linked CI run for actual
 results; a configured job is not a passing test.
 
-**Not provided:** streaming cursors, interactive transaction callbacks, cancellation,
-named parameters, exposed prepared-statement handles, partial sync, encryption
+**Not provided:** streaming cursors, cancellation, named parameters,
+exposed prepared-statement handles, partial sync, encryption
 configuration, multi-process coordination, or compatibility with `sqlite3` handles.
 Queries buffer all rows and use a private tagged JSON FFI transport: use SQL LIMIT
 for large results; this is not a zero-copy analytics binding. Never independently

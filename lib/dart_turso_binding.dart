@@ -69,6 +69,21 @@ final class TursoDatabase {
   bool _closing = false;
   Object? _failure;
   Future<void>? _closeFuture;
+  final _operations = _OperationQueue();
+  final _transactionZone = Object();
+  Object? _transactionFailure;
+
+  void _checkSubmission() {
+    if (_closing) throw StateError('Database is closed');
+    if (Zone.current[_transactionZone] == true) {
+      throw StateError('Use the transaction handle inside a transaction');
+    }
+  }
+
+  Future<T> _schedule<T>(Future<T> Function() action) => _operations.run(() {
+    if (_transactionFailure case final failure?) throw failure;
+    return action();
+  });
 
   /// Open an in-memory or file-backed local database with FTS enabled.
   static Future<TursoDatabase> open(String path) =>
@@ -146,9 +161,9 @@ final class TursoDatabase {
     return completer.future;
   }
 
-  Future<Object?> _call(Map<String, Object?> message) {
-    if (_closing) return Future.error(StateError('Database is closed'));
-    return _send(message);
+  Future<Object?> _call(Map<String, Object?> message) async {
+    _checkSubmission();
+    return _schedule(() => _send(message));
   }
 
   /// Execute a single SQL statement. This is not a multi-statement script API.
@@ -175,10 +190,57 @@ final class TursoDatabase {
         as Map<String, dynamic>,
   );
 
+  /// Run a read/validate/write callback under an exclusive BEGIN IMMEDIATE.
+  ///
+  /// Other database operations, including sync and close, wait for completion.
+  /// Use only [TursoTransaction] for this database inside the callback; calling
+  /// the database directly (including nested transactions or close) is rejected.
+  /// The handle expires when the callback returns. Submitted handle operations
+  /// are drained before commit; any failed operation rolls back the transaction,
+  /// even if its error was caught by the callback.
+  ///
+  /// Transaction-control SQL must not be submitted through the handle.
+  /// On callback/statement/commit failure, rollback is attempted. If rollback
+  /// fails, subsequent work is rejected; [close] still releases the worker.
+  Future<T> transaction<T>(
+    FutureOr<T> Function(TursoTransaction tx) action,
+  ) async {
+    _checkSubmission();
+    return _schedule(() async {
+      await _transactionControl('BEGIN IMMEDIATE');
+      final tx = TursoTransaction._(this);
+      try {
+        final result = await runZoned(
+          () => action(tx),
+          zoneValues: {_transactionZone: true},
+        );
+        await tx._finish();
+        await _transactionControl('COMMIT');
+        return result;
+      } catch (error, stack) {
+        tx._active = false;
+        await tx._operations.drain;
+        try {
+          await _transactionControl('ROLLBACK');
+        } catch (rollback) {
+          final failure = TursoException(
+            '$error; rollback failed: $rollback; close and reopen the database',
+          );
+          _transactionFailure = failure;
+          throw failure;
+        }
+        Error.throwWithStackTrace(error, stack);
+      }
+    });
+  }
+
+  Future<Object?> _transactionControl(String sql) =>
+      _send({'op': 'execute', 'statement': SqlStatement(sql)._encode()});
+
   /// Execute an atomic batch without interleaving other submitted operations.
   ///
   /// Statements must not contain transaction-control SQL (BEGIN/COMMIT/ROLLBACK).
-  /// This initial API does not provide interactive transaction callbacks.
+  /// Use [transaction] when subsequent statements depend on query results.
   Future<List<int>> batch(List<SqlStatement> statements) async =>
       List<int>.unmodifiable(
         await _call({
@@ -209,8 +271,11 @@ final class TursoDatabase {
   ///
   /// Does not push pending writes; they remain on disk for a later session.
   Future<void> close() {
+    if (Zone.current[_transactionZone] == true) {
+      return Future.error(StateError('Cannot close inside a transaction'));
+    }
     _closing = true;
-    return _closeFuture ??= _close();
+    return _closeFuture ??= _operations.run(_close);
   }
 
   Future<void> _close() async {
@@ -222,6 +287,67 @@ final class TursoDatabase {
       _events.close();
       await _subscription.cancel();
     }
+  }
+}
+
+/// A callback-scoped connection. Never submit transaction-control SQL.
+final class TursoTransaction {
+  TursoTransaction._(this._database);
+
+  final TursoDatabase _database;
+  final _operations = _OperationQueue();
+  bool _active = true;
+  Object? _error;
+  StackTrace? _stack;
+
+  Future<Object?> _call(String op, SqlStatement statement) async {
+    if (!_active) throw StateError('Transaction is no longer active');
+    return _operations.run(() async {
+      try {
+        return await _database._send({
+          'op': op,
+          'statement': statement._encode(),
+        });
+      } catch (error, stack) {
+        _error ??= error;
+        _stack ??= stack;
+        rethrow;
+      }
+    });
+  }
+
+  Future<ExecuteResult> execute(
+    String sql, [
+    List<Object?> parameters = const [],
+  ]) async => ExecuteResult._(
+    await _call('execute', SqlStatement(sql, parameters))
+        as Map<String, dynamic>,
+  );
+
+  Future<QueryResult> query(
+    String sql, [
+    List<Object?> parameters = const [],
+  ]) async => QueryResult._(
+    await _call('query', SqlStatement(sql, parameters)) as Map<String, dynamic>,
+  );
+
+  Future<void> _finish() async {
+    _active = false;
+    await _operations.drain;
+    if (_error case final error?) {
+      Error.throwWithStackTrace(error, _stack!);
+    }
+  }
+}
+
+final class _OperationQueue {
+  Future<void> _tail = Future.value();
+  Future<void> get drain => _tail;
+
+  Future<T> run<T>(Future<T> Function() action) {
+    final result = _tail.then((_) => action());
+    _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return result;
   }
 }
 
