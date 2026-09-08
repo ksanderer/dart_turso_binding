@@ -1,0 +1,7 @@
+.dart_tool/
+build/
+rust/target/
+*.db
+*.db-*
+*.db.*
+coverage/

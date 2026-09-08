@@ -1,0 +1,7 @@
+.git/
+.github/
+.dart_tool/
+build/
+rust/target/
+coverage/
+tool/
