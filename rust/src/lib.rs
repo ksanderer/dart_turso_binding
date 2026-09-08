@@ -214,7 +214,10 @@ async fn dispatch(database: &mut Option<Database>, request: Request) -> Result<J
 #[unsafe(no_mangle)]
 pub extern "C" fn dtb_create() -> *mut Session {
     catch_unwind(|| {
-        Runtime::new()
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
             .map(|runtime| {
                 Box::into_raw(Box::new(Session {
                     database: None,

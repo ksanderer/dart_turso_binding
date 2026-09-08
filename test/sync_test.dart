@@ -52,6 +52,7 @@ void main() {
           '${directory.path}/remote.db',
           '--sync-server',
           '127.0.0.1:$port',
+          '--experimental-index-method',
         ]);
         process.stdout.transform(utf8.decoder).listen(output.write);
         process.stderr.transform(utf8.decoder).listen(output.write);
@@ -101,6 +102,48 @@ void main() {
           (await b.query('SELECT body FROM notes WHERE id=?', ['n2'])).rows,
           [
             ['pending'],
+          ],
+        );
+
+        await a.execute(
+          'CREATE TABLE search_docs(id INTEGER PRIMARY KEY, body TEXT)',
+        );
+        await a.execute(
+          'CREATE INDEX search_fts ON search_docs USING fts(body)',
+        );
+        await a.execute('INSERT INTO search_docs VALUES (1, ?)', [
+          'searchable',
+        ]);
+        await a.push();
+        await b.pull();
+        expect(
+          (await b.query(
+            'SELECT id FROM search_docs WHERE fts_match(body, ?)',
+            ['searchable'],
+          )).rows,
+          [
+            [1],
+          ],
+        );
+        await a.execute('UPDATE search_docs SET body=? WHERE id=1', [
+          'updated',
+        ]);
+        await a.push();
+        await b.pull();
+        expect(
+          (await b.query(
+            'SELECT id FROM search_docs WHERE fts_match(body, ?)',
+            ['searchable'],
+          )).rows,
+          isEmpty,
+        );
+        expect(
+          (await b.query(
+            'SELECT id FROM search_docs WHERE fts_match(body, ?)',
+            ['updated'],
+          )).rows,
+          [
+            [1],
           ],
         );
       } finally {

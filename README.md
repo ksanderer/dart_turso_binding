@@ -75,8 +75,9 @@ try {
 First open starts empty unless `bootstrap: true` is requested. Sync uses upstream
 push/pull semantics, **not CRDT merging**; conflicts use last-push-wins. Static
 authentication tokens require closing/reopening to rotate. Sync methods reject
-local-only databases. Test-server coverage is not proof of all Turso Cloud
-configurations; cloud authentication and FTS-over-sync need separate validation.
+local-only databases. Tests cover FTS after remote inserts and updates against the
+pinned local sync server. Cloud authentication and server configuration still
+require separate validation; local-server tests are not a Turso Cloud certification.
 
 ### Full-text search
 
