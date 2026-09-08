@@ -303,6 +303,11 @@ final class TursoTransaction {
   Future<Object?> _call(String op, SqlStatement statement) async {
     if (!_active) throw StateError('Transaction is no longer active');
     return _operations.run(() async {
+      // Some SQL errors can roll back the engine transaction themselves.
+      // Never let later queued statements escape into autocommit in that case.
+      if (_error case final error?) {
+        Error.throwWithStackTrace(error, _stack!);
+      }
       try {
         return await _database._send({
           'op': op,
