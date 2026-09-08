@@ -17,7 +17,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: '3.13.2'
@@ -42,7 +42,7 @@ jobs:
       run:
         working-directory: rust
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
@@ -59,7 +59,7 @@ jobs:
       matrix:
         target: [aarch64-apple-ios, aarch64-apple-ios-sim]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
@@ -71,7 +71,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: android-actions/setup-android@v3
       - run: sdkmanager 'ndk;27.2.12479018'
       - uses: Swatinem/rust-cache@v2
