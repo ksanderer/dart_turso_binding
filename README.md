@@ -30,8 +30,9 @@ macOS, a C/C++ toolchain on Linux, Visual Studio C++ Build Tools and the Windows
 on Windows). On Windows, run from the **x64 Native Tools Command Prompt** so the
 SDK resource compiler (`rc.exe`) is on PATH.
 Build hooks compile the bundled Rust crate from source; no opaque prebuilt
-binding binaries are downloaded. Rust **1.95.0**, Turso **0.7.2**, and the native
-lockfile are pinned. First builds download dependencies and can take minutes.
+binding binaries are downloaded. Rust **1.95.0**, the Turso Rust SDK
+**0.8.0-pre.7**, resolved engine **0.8.0-pre.9**, and the native lockfile are
+pinned. First builds download dependencies and can take minutes.
 
 ## Usage
 
@@ -135,6 +136,42 @@ configuration, multi-process coordination, or compatibility with `sqlite3` handl
 Queries buffer all rows and use a private tagged JSON FFI transport: use SQL LIMIT
 for large results; this is not a zero-copy analytics binding. Never independently
 write the same synced file through another database driver.
+
+## Bounded query-only execution
+
+`await db.queryReadOnly(sql, parameters)` and `await tx.queryReadOnly(...)`
+execute on the **owning local connection**, including in-memory databases.
+The transaction variant sees uncommitted writes. Synced databases are unsupported.
+Ordinary `query()` remains unrestricted.
+
+The Turso parser must accept exactly one SELECT/VALUES command, including CTEs.
+DML, DDL, PRAGMA, transaction control and additional statements are rejected
+before preparation. File/extension/state-changing function calls are blocked;
+only `json_each` and `json_tree` table calls are supported. Runtime extension
+loading is disabled on library connections; no user UDFs are registered.
+This deliberately does not rely on `query_only=1`, whose write gaps are tracked
+in [Turso #8862](https://github.com/tursodatabase/turso/issues/8862).
+
+Queries reject SQL over 64 KiB and results over 10,000 rows or 4 MiB of serialized
+row cells. Native execution has a two-second timeout. Failures never return
+successful partial results. These bounds are not a hard memory limit on a single
+expression or an interruption guarantee during preparation. Statements are
+finalized and the previous connection timeout restored on success and failure.
+
+Use `tx.savepoint((operation) => operation.queryReadOnly(...))` to isolate a
+caught query failure. An engine failure that aborts the enclosing transaction
+still aborts the invocation; it must not silently resume in autocommit.
+
+Production regressions are in `test/read_query_test.dart` and
+`test/transaction_read_query_test.dart`. The historical upstream reproducers
+in `rust/tests/query_only_scheme.rs` and `rust/examples/query_only_writes.rs`
+exercise the old query_only flag approach, not this guarded API; three assertions
+in that experimental Rust suite intentionally fail on the pinned upstream version.
+
+The separate `read_only(true)` registry-reuse problem is already tracked in
+[Turso #6031](https://github.com/tursodatabase/turso/issues/6031).
+[PR #6066](https://github.com/tursodatabase/turso/pull/6066) was closed without
+merging; it is not a shipped fix for that problem.
 
 ## Development and releases
 

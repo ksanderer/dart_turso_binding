@@ -14,3 +14,8 @@ turso = { version = "=0.8.0-pre.7", default-features = false, features = ["fts",
 tokio = { version = "1", features = ["rt-multi-thread", "time", "net"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+turso_parser = { version = "=0.8.0-pre.9", default-features = false, features = ["serde"] }
+turso_sdk_kit = { version = "=0.8.0-pre.9", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"

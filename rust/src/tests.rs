@@ -62,3 +62,15 @@ fn embedded_nuls_and_blob_bytes_survive_wire_encoding() {
         assert_eq!(decoded.into_value().unwrap(), value);
     }
 }
+
+#[test]
+fn local_reader_reuses_a_connection_opened_with_a_relative_path() {
+    let directory = tempfile::tempdir_in(".").unwrap();
+    let file = std::path::Path::new(directory.path().file_name().unwrap()).join("relative.db");
+    assert!(!file.is_absolute());
+    let session = Handle::new();
+    let result = session.request(&json!({"op": "open", "path": file}).to_string());
+    assert!(result.get("error").is_none(), "{result}");
+    let result = session.request(r#"{"op":"query_read_only","statement":{"sql":"SELECT 1"}}"#);
+    assert_eq!(result["result"]["rows"][0][0]["value"], "1");
+}

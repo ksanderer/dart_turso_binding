@@ -38,6 +38,9 @@ impl Cell {
     }
 }
 
+mod local;
+mod read_query;
+
 #[derive(Deserialize)]
 struct Statement {
     sql: String,
@@ -54,11 +57,16 @@ enum Request {
         auth_token: Option<String>,
         #[serde(default)]
         bootstrap: bool,
+        #[serde(default)]
+        experimental_without_rowid: bool,
     },
     Execute {
         statement: Statement,
     },
     Query {
+        statement: Statement,
+    },
+    QueryReadOnly {
         statement: Statement,
     },
     Batch {
@@ -71,9 +79,9 @@ enum Request {
 }
 
 struct Database {
-    connection: turso::Connection,
+    connection: Option<turso::Connection>,
     // Keep the owner alive until after its connection is dropped.
-    _local: Option<turso::Database>,
+    _local: Option<local::Database>,
     sync: Option<turso::sync::Database>,
 }
 
@@ -105,6 +113,7 @@ async fn dispatch(database: &mut Option<Database>, request: Request) -> Result<J
         remote_url,
         auth_token,
         bootstrap,
+        experimental_without_rowid,
     } = request
     {
         if database.is_some() {
@@ -121,19 +130,24 @@ async fn dispatch(database: &mut Option<Database>, request: Request) -> Result<J
             let sync = builder.build().await.map_err(error)?;
             let connection = sync.connect().await.map_err(error)?;
             Database {
-                connection,
+                connection: Some(connection),
                 _local: None,
                 sync: Some(sync),
             }
         } else {
-            let local = turso::Builder::new_local(&path)
-                .experimental_index_method(true)
-                .build()
-                .await
-                .map_err(error)?;
-            let connection = local.connect().map_err(error)?;
+            // Anchor storage before opening, independent of later cwd changes.
+            let path = if path == ":memory:" || path.starts_with("file:") {
+                path
+            } else {
+                std::path::absolute(path)
+                    .map_err(|e| e.to_string())?
+                    .to_str()
+                    .ok_or("Database path is not UTF-8")?
+                    .to_owned()
+            };
+            let local = local::Database::open(path, experimental_without_rowid)?;
             Database {
-                connection,
+                connection: None,
                 _local: Some(local),
                 sync: None,
             }
@@ -141,20 +155,37 @@ async fn dispatch(database: &mut Option<Database>, request: Request) -> Result<J
         return Ok(Json::Null);
     }
     let db = database.as_mut().ok_or("Database is not open")?;
+    if let Some(local) = &db._local
+        && matches!(
+            &request,
+            Request::Execute { .. }
+                | Request::Query { .. }
+                | Request::QueryReadOnly { .. }
+                | Request::Batch { .. }
+        )
+    {
+        return local.request(request);
+    }
     match request {
         Request::Execute { statement } => {
             let changed = db
                 .connection
+                .as_ref()
+                .ok_or("Missing synced connection")?
                 .execute(statement.sql, params(statement.parameters)?)
                 .await
                 .map_err(error)?;
             Ok(
-                json!({"rowsAffected": changed, "lastInsertRowId": db.connection.last_insert_rowid().to_string()}),
+                json!({"rowsAffected": changed, "lastInsertRowId": db.connection.as_ref().unwrap().last_insert_rowid().to_string()}),
             )
         }
+        Request::QueryReadOnly { .. } => Err("Read-only SQL is local-only".into()),
         Request::Query { statement } => {
+            // Ordinary query remains unchanged; untrusted filters use QueryReadOnly.
             let mut rows = db
                 .connection
+                .as_ref()
+                .ok_or("Missing synced connection")?
                 .query(statement.sql, params(statement.parameters)?)
                 .await
                 .map_err(error)?;
@@ -175,7 +206,13 @@ async fn dispatch(database: &mut Option<Database>, request: Request) -> Result<J
                 .map(|s| Ok((s.sql, params(s.parameters)?)))
                 .collect();
             let statements = statements?;
-            let tx = db.connection.transaction().await.map_err(error)?;
+            let tx = db
+                .connection
+                .as_mut()
+                .ok_or("Missing synced connection")?
+                .transaction()
+                .await
+                .map_err(error)?;
             let mut counts = Vec::new();
             for (sql, parameters) in statements {
                 match tx.execute(sql, parameters).await {

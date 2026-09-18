@@ -86,8 +86,16 @@ final class TursoDatabase {
   });
 
   /// Open an in-memory or file-backed local database with FTS enabled.
-  static Future<TursoDatabase> open(String path) =>
-      _open({'op': 'open', 'path': path});
+  /// Opt into Turso's experimental WITHOUT ROWID support for this database.
+  /// Pass the same option on every reopen; separate readers inherit it.
+  static Future<TursoDatabase> open(
+    String path, {
+    bool experimentalWithoutRowid = false,
+  }) => _open({
+    'op': 'open',
+    'path': path,
+    'experimental_without_rowid': experimentalWithoutRowid,
+  });
 
   /// Open a local-first sync database. No initial download unless requested.
   ///
@@ -190,6 +198,21 @@ final class TursoDatabase {
         as Map<String, dynamic>,
   );
 
+  /// Executes one parsed SELECT/VALUES statement on this local connection.
+  /// DML, DDL, PRAGMA, transaction control and unsafe function calls are rejected.
+  /// Limits: 64 KiB SQL, 10,000 rows, 4 MiB wire rows, 2 s native execution.
+  /// Supports in-memory databases; synced databases are unsupported.
+  Future<QueryResult> queryReadOnly(
+    String sql, [
+    List<Object?> parameters = const [],
+  ]) async => QueryResult._(
+    await _call({
+          'op': 'query_read_only',
+          'statement': SqlStatement(sql, parameters)._encode(),
+        })
+        as Map<String, dynamic>,
+  );
+
   /// Run a read/validate/write callback under an exclusive BEGIN IMMEDIATE.
   ///
   /// Other database operations, including sync and close, wait for completion.
@@ -197,7 +220,7 @@ final class TursoDatabase {
   /// the database directly (including nested transactions or close) is rejected.
   /// The handle expires when the callback returns. Submitted handle operations
   /// are drained before commit; any failed operation rolls back the transaction,
-  /// even if its error was caught by the callback.
+  /// even if caught, except a failure isolated by a rolled-back savepoint.
   ///
   /// Transaction-control SQL must not be submitted through the handle.
   /// On callback/statement/commit failure, rollback is attempted. If rollback
@@ -299,6 +322,48 @@ final class TursoTransaction {
   bool _active = true;
   Object? _error;
   StackTrace? _stack;
+  int _savepointSequence = 0;
+
+  /// Isolate one operation. A handled failure rolls back only this savepoint.
+  /// Use the supplied handle exclusively until this callback finishes.
+  Future<T> savepoint<T>(FutureOr<T> Function(TursoTransaction tx) action) {
+    if (!_active) {
+      return Future.error(StateError('Transaction is no longer active'));
+    }
+    return _operations.run(() async {
+      if (_error case final error?) Error.throwWithStackTrace(error, _stack!);
+      final name = 'dart_operation_${++_savepointSequence}';
+      final child = TursoTransaction._(_database);
+      try {
+        await _database._transactionControl('SAVEPOINT $name');
+      } catch (error, stack) {
+        _error = error;
+        _stack = stack;
+        rethrow;
+      }
+      try {
+        final result = await runZoned(
+          () => action(child),
+          zoneValues: {_database._transactionZone: true},
+        );
+        await child._finish();
+        await _database._transactionControl('RELEASE $name');
+        return result;
+      } catch (error, stack) {
+        child._active = false;
+        await child._operations.drain;
+        try {
+          await _database._transactionControl('ROLLBACK TO $name');
+          await _database._transactionControl('RELEASE $name');
+        } catch (rollback, rollbackStack) {
+          _error = rollback;
+          _stack = rollbackStack;
+          Error.throwWithStackTrace(rollback, rollbackStack);
+        }
+        Error.throwWithStackTrace(error, stack);
+      }
+    });
+  }
 
   Future<Object?> _call(String op, SqlStatement statement) async {
     if (!_active) throw StateError('Transaction is no longer active');
@@ -334,6 +399,17 @@ final class TursoTransaction {
     List<Object?> parameters = const [],
   ]) async => QueryResult._(
     await _call('query', SqlStatement(sql, parameters)) as Map<String, dynamic>,
+  );
+
+  /// Read-only SELECT/VALUES on this transaction's connection, seeing its writes.
+  /// Has the same restrictions and bounds as [TursoDatabase.queryReadOnly].
+  /// Use [savepoint] to isolate a caught query error.
+  Future<QueryResult> queryReadOnly(
+    String sql, [
+    List<Object?> parameters = const [],
+  ]) async => QueryResult._(
+    await _call('query_read_only', SqlStatement(sql, parameters))
+        as Map<String, dynamic>,
   );
 
   Future<void> _finish() async {
