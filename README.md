@@ -30,9 +30,13 @@ macOS, a C/C++ toolchain on Linux, Visual Studio C++ Build Tools and the Windows
 on Windows). On Windows, run from the **x64 Native Tools Command Prompt** so the
 SDK resource compiler (`rc.exe`) is on PATH.
 Build hooks compile the bundled Rust crate from source; no opaque prebuilt
-binding binaries are downloaded. Rust **1.95.0**, the Turso Rust SDK
+binding binaries are downloaded. Rust **1.98.1**, the Turso Rust SDK
 **0.8.0-pre.7**, resolved engine **0.8.0-pre.9**, and the native lockfile are
 pinned. First builds download dependencies and can take minutes.
+
+The Rust pin includes the LLVM Mach-O alignment fix needed by macOS 27 when
+loading stripped dynamic libraries (rust-lang/rust#158410). The build hook tracks
+`rust/rust-toolchain.toml` so changing the pin invalidates cached native assets.
 
 ## Usage
 
