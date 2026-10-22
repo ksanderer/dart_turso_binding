@@ -205,11 +205,13 @@ void main() {
     'close drains outstanding work, is idempotent, and rejects new work',
     () async {
       final query = db.query('SELECT 42');
+      expect(db.nativeDestructionConfirmed, isFalse);
       final closed = db.close();
       expect((await query).rows, [
         [42],
       ]);
       await closed;
+      expect(db.nativeDestructionConfirmed, isTrue);
       await db.close();
       await expectLater(db.query('SELECT 1'), throwsStateError);
     },

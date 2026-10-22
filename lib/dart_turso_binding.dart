@@ -69,9 +69,15 @@ final class TursoDatabase {
   bool _closing = false;
   Object? _failure;
   Future<void>? _closeFuture;
+  bool _nativeDestructionConfirmed = false;
   final _operations = _OperationQueue();
   final _transactionZone = Object();
   Object? _transactionFailure;
+
+  /// True only after the exact worker acknowledged native destruction during
+  /// normal close. An error/exit event followed by [close] is not that proof.
+  /// Owners of external lifetime resources must retain them unless this is true.
+  bool get nativeDestructionConfirmed => _nativeDestructionConfirmed;
 
   void _checkSubmission() {
     if (_closing) throw StateError('Database is closed');
@@ -305,6 +311,7 @@ final class TursoDatabase {
     try {
       if (_commands != null && _failure == null) {
         await _send({'op': 'close'});
+        _nativeDestructionConfirmed = true;
       }
     } finally {
       _events.close();
